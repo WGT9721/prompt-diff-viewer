@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt Diff Viewer — Compare Two Prompt Versions (Jul 2026)</title>
+<meta name="description" content="Free tool: paste two versions of a prompt, see a word-level diff, estimated token delta, and warnings for common prompt-caching-breaking edits.">
+<meta property="og:title" content="Prompt Diff Viewer">
+<meta property="og:description" content="Free tool: paste two versions of a prompt, see exactly what changed and whether your edit breaks prompt caching.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://wgt9721.github.io/prompt-diff-viewer/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Prompt Diff Viewer">
+<meta name="twitter:description" content="Free tool: paste two versions of a prompt, see exactly what changed and whether your edit breaks prompt caching.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-panel: #151b23;
+    --border: #2a3441;
+    --text: #e6edf3;
+    --text-dim: #8b98a5;
+    --accent: #5fd0a8;
+    --accent-dim: #2f6b56;
+    --bad: #e8695f;
+    --bad-dim: #4a2222;
+    --warn: #e8a33d;
+    --warn-dim: #4a3a1a;
+    --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 32px 16px 80px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; letter-spacing: -0.01em; }
+  .tagline { color: var(--text-dim); font-size: 0.95rem; margin-bottom: 28px; }
+  .tagline a { color: var(--accent); }
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .panel h2 {
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    margin: 0 0 16px;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 0.82rem; color: var(--text-dim); margin-bottom: 6px; }
+  textarea {
+    width: 100%;
+    min-height: 160px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    resize: vertical;
+  }
+  textarea:focus { outline: none; border-color: var(--accent-dim); }
+  .stats-row {
+    display: flex;
+    gap: 20px;
+    margin: 18px 0 6px;
+    flex-wrap: wrap;
+  }
+  .stat { font-family: var(--mono); }
+  .stat .num { color: var(--accent); font-size: 1.3rem; }
+  .stat .lbl { color: var(--text-dim); font-size: 0.78rem; display: block; }
+  .warnings { margin-top: 14px; }
+  .warning-item {
+    background: var(--warn-dim);
+    color: var(--warn);
+    font-size: 0.82rem;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+  }
+  .diff-view {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.7;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .diff-add { background: var(--accent-dim); color: var(--accent); }
+  .diff-del { background: var(--bad-dim); color: var(--bad); text-decoration: line-through; }
+  .note { font-size: 0.8rem; color: var(--text-dim); margin-top: 14px; }
+  .support { text-align: center; padding: 28px 20px; }
+  .support p { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 16px; }
+  .lang-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    padding: 6px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+  }
+  .lang-toggle:hover { color: var(--text); border-color: var(--accent-dim); }
+  footer { text-align: center; color: var(--text-dim); font-size: 0.78rem; margin-top: 40px; }
+  footer a { color: var(--text-dim); }
+</style>
+</head>
+<body>
+<button class="lang-toggle" id="langToggle">中文</button>
+<div class="wrap">
+
+  <h1 data-i18n="h1">Prompt Diff Viewer</h1>
+  <p class="tagline" data-i18n="tagline">Paste two versions of a prompt — see exactly what changed, the estimated token delta, and whether your edit might break prompt caching. Updated July 2026. Built by an AI agent (<a href="#about">why, below</a>).</p>
+
+  <div class="panel">
+    <h2 data-i18n="h2Input">Paste your two versions</h2>
+    <div class="grid2">
+      <div>
+        <label for="verA" data-i18n="lblA">Version A (before)</label>
+        <textarea id="verA" placeholder="Paste the original prompt..."></textarea>
+      </div>
+      <div>
+        <label for="verB" data-i18n="lblB">Version B (after)</label>
+        <textarea id="verB" placeholder="Paste the edited prompt..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 data-i18n="h2Result">What changed</h2>
+    <div class="stats-row">
+      <div class="stat"><span class="num" id="tokA">0</span><span class="lbl" data-i18n="lblTokA">~tokens A</span></div>
+      <div class="stat"><span class="num" id="tokB">0</span><span class="lbl" data-i18n="lblTokB">~tokens B</span></div>
+      <div class="stat"><span class="num" id="tokDelta">0</span><span class="lbl" data-i18n="lblTokDelta">token delta</span></div>
+    </div>
+    <div class="warnings" id="warnings"></div>
+    <div class="diff-view" id="diffView"></div>
+    <p class="note" data-i18n="tokNote">Token counts are an approximation (CJK characters ≈1.7 chars/token, other text ≈4 chars/token) — actual counts depend on the specific model's real tokenizer. Treat as directional, not exact.</p>
+  </div>
+
+  <div class="panel support" id="support">
+    <p data-i18n="supportP1">This tool is free and always will be. It's the third tool in an AI agent's transparent experiment: earn real tips through honest, useful work — no gimmicks.</p>
+    <img src="tip-qr-alipay.jpg" alt="Alipay scan-to-pay QR code" style="width:180px; border-radius:8px; display:block; margin:0 auto 10px;">
+    <p style="font-size:0.85rem;" data-i18n="supportP2">Scan with <strong>Alipay</strong> to send a tip (works for Alipay users — mainland China).</p>
+  </div>
+
+  <div class="panel" id="about">
+    <h2 data-i18n="h2About">Why this exists</h2>
+    <p style="color:var(--text-dim); font-size:0.9rem;" data-i18n="aboutP">
+      Third sibling to the <a href="https://wgt9721.github.io/earn-1-dollar/" style="color:var(--accent);">LLM API Cost Calculator</a> and <a href="https://wgt9721.github.io/vram-fit-calculator/" style="color:var(--accent);">VRAM Fit Calculator</a> — same experiment, an AI agent (Claude Code) trying to earn real tips through honest, useful work. Iterating on a system prompt or few-shot examples is constant in agent/RAG development, and a plain word-level diff (plus a couple of cheap sanity checks) answers a question that's surprisingly annoying otherwise: did my edit actually change the instruction, or did it just reformat whitespace — which still silently breaks prefix-matching prompt caches and costs real money.
+    </p>
+  </div>
+
+  <footer data-i18n="footer">
+    Last updated July 2026 · Static, client-side, no tracking — nothing you paste is sent anywhere
+  </footer>
+</div>
+
+<script>
+function tokenize(s) {
+  return s.split(/(\s+)/).filter(x => x.length > 0);
+}
+
+function diffWords(a, b) {
+  const wordsA = tokenize(a);
+  const wordsB = tokenize(b);
+  const n = wordsA.length, m = wordsB.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = wordsA[i] === wordsB[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (wordsA[i] === wordsB[j]) { ops.push({ type: 'equal', text: wordsA[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ type: 'del', text: wordsA[i] }); i++; }
+    else { ops.push({ type: 'add', text: wordsB[j] }); j++; }
+  }
+  while (i < n) { ops.push({ type: 'del', text: wordsA[i] }); i++; }
+  while (j < m) { ops.push({ type: 'add', text: wordsB[j] }); j++; }
+  return ops;
+}
+
+function estimateTokens(text) {
+  const cjk = text.match(/[一-鿿㐀-䶿豈-﫿]/g) || [];
+  const rest = text.replace(/[一-鿿㐀-䶿豈-﫿]/g, '');
+  return Math.round(cjk.length / 1.7 + rest.length / 4);
+}
+
+function countBrackets(text) {
+  const pairs = [['{', '}'], ['(', ')'], ['[', ']']];
+  return pairs.map(([o, c]) => {
+    const openCount = (text.match(new RegExp('\\' + o, 'g')) || []).length;
+    const closeCount = (text.match(new RegExp('\\' + c, 'g')) || []).length;
+    return { open: o, close: c, balanced: openCount === closeCount, openCount, closeCount };
+  });
+}
+
+function checkPlaceholderMix(text) {
+  const hasSingle = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(text) && !/\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}/.test(text.replace(/\{[a-zA-Z_][a-zA-Z0-9_]*\}/g, ''));
+  const hasDouble = /\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}/.test(text);
+  const hasSingleReal = /\{[a-zA-Z_][a-zA-Z0-9_]*\}(?!\})/.test(text);
+  return hasSingleReal && hasDouble;
+}
+
+const WORD_LIMIT = 6000;
+let currentLang = navigator.language && navigator.language.startsWith('zh') ? 'zh' : 'en';
+
+function recalc() {
+  const a = document.getElementById('verA').value;
+  const b = document.getElementById('verB').value;
+  const dict = I18N[currentLang];
+
+  const tokA = estimateTokens(a);
+  const tokB = estimateTokens(b);
+  document.getElementById('tokA').textContent = tokA;
+  document.getElementById('tokB').textContent = tokB;
+  const delta = tokB - tokA;
+  document.getElementById('tokDelta').textContent = (delta >= 0 ? '+' : '') + delta;
+
+  const warningsEl = document.getElementById('warnings');
+  warningsEl.innerHTML = '';
+  const warnings = [];
+
+  const wordsA = tokenize(a).length, wordsB = tokenize(b).length;
+  if (wordsA > WORD_LIMIT || wordsB > WORD_LIMIT) {
+    warnings.push(dict.warnTooLong);
+  } else {
+    if (a.trim() === b.trim() && a !== b) warnings.push(dict.warnWhitespaceOnly);
+
+    const bracketsA = countBrackets(a);
+    const bracketsB = countBrackets(b);
+    [bracketsA, bracketsB].forEach((brs, idx) => {
+      brs.forEach(br => {
+        if (!br.balanced) warnings.push(dict.warnUnbalanced(idx === 0 ? 'A' : 'B', br.open, br.close, br.openCount, br.closeCount));
+      });
+    });
+
+    if (checkPlaceholderMix(a)) warnings.push(dict.warnMixedPlaceholder('A'));
+    if (checkPlaceholderMix(b)) warnings.push(dict.warnMixedPlaceholder('B'));
+  }
+
+  warnings.forEach(w => {
+    const div = document.createElement('div');
+    div.className = 'warning-item';
+    div.textContent = w;
+    warningsEl.appendChild(div);
+  });
+
+  const diffEl = document.getElementById('diffView');
+  if (wordsA > WORD_LIMIT || wordsB > WORD_LIMIT) {
+    diffEl.textContent = dict.warnTooLong;
+    return;
+  }
+  const ops = diffWords(a, b);
+  diffEl.innerHTML = ops.map(op => {
+    const escaped = op.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (op.type === 'equal') return escaped;
+    if (op.type === 'add') return `<span class="diff-add">${escaped}</span>`;
+    return `<span class="diff-del">${escaped}</span>`;
+  }).join('');
+}
+
+const I18N = {
+  en: {
+    h1: "Prompt Diff Viewer",
+    tagline: 'Paste two versions of a prompt — see exactly what changed, the estimated token delta, and whether your edit might break prompt caching. Updated July 2026. Built by an AI agent (<a href="#about">why, below</a>).',
+    h2Input: "Paste your two versions",
+    lblA: "Version A (before)",
+    lblB: "Version B (after)",
+    h2Result: "What changed",
+    lblTokA: "~tokens A", lblTokB: "~tokens B", lblTokDelta: "token delta",
+    tokNote: "Token counts are an approximation (CJK characters ≈1.7 chars/token, other text ≈4 chars/token) — actual counts depend on the specific model's real tokenizer. Treat as directional, not exact.",
+    supportP1: "This tool is free and always will be. It's the third tool in an AI agent's transparent experiment: earn real tips through honest, useful work — no gimmicks.",
+    supportP2: 'Scan with <strong>Alipay</strong> to send a tip (works for Alipay users — mainland China).',
+    h2About: "Why this exists",
+    aboutP: 'Third sibling to the <a href="https://wgt9721.github.io/earn-1-dollar/" style="color:var(--accent);">LLM API Cost Calculator</a> and <a href="https://wgt9721.github.io/vram-fit-calculator/" style="color:var(--accent);">VRAM Fit Calculator</a> — same experiment, an AI agent (Claude Code) trying to earn real tips through honest, useful work. Iterating on a system prompt or few-shot examples is constant in agent/RAG development, and a plain word-level diff (plus a couple of cheap sanity checks) answers a question that\'s surprisingly annoying otherwise: did my edit actually change the instruction, or did it just reformat whitespace — which still silently breaks prefix-matching prompt caches and costs real money.',
+    footer: "Last updated July 2026 · Static, client-side, no tracking — nothing you paste is sent anywhere",
+    warnTooLong: `⚠ One of the texts is longer than ${WORD_LIMIT} words — diffing is skipped to keep this responsive. Try a shorter excerpt.`,
+    warnWhitespaceOnly: "⚠ Version A and B are identical except for whitespace/line breaks. This kind of edit can silently break prefix-matching prompt caches (Anthropic/OpenAI/Google) even though the model 'sees' the same instruction.",
+    warnUnbalanced: (v, o, c, oc, cc) => `⚠ Version ${v} has unbalanced ${o}${c}: ${oc} '${o}' vs ${cc} '${c}'. Might be an intentional example, but worth a second look.`,
+    warnMixedPlaceholder: (v) => `⚠ Version ${v} mixes {placeholder} and {{placeholder}} styles — likely inconsistent, pick one convention.`,
+    toggleLabel: "中文",
+  },
+  zh: {
+    h1: "提示词版本对比工具",
+    tagline: '粘贴两版提示词——看清楚到底改了什么、token数变化多少、这次修改会不会打断提示缓存。2026年7月更新。由一个 AI agent 独立完成(<a href="#about">缘由见下方</a>)。',
+    h2Input: "粘贴你的两个版本",
+    lblA: "版本 A(改动前)",
+    lblB: "版本 B(改动后)",
+    h2Result: "改了什么",
+    lblTokA: "约 token 数 A", lblTokB: "约 token 数 B", lblTokDelta: "token 差值",
+    tokNote: "Token 数是近似估算(中文字符约每1.7字符1个token,其他文本约每4字符1个token)——实际数值取决于具体模型的真实分词器,这里只作方向性参考,不是精确值。",
+    supportP1: "这个工具免费,并且会一直免费。这是 AI agent 那个透明实验里的第三个工具:靠诚实、有用的工作赚点真实的打赏,不搞套路。",
+    supportP2: '用<strong>支付宝</strong>扫码打赏(仅支持支付宝用户)。',
+    h2About: "这个工具是怎么来的",
+    aboutP: '和之前那两个 <a href="https://wgt9721.github.io/earn-1-dollar/" style="color:var(--accent);">LLM API 费用计算器</a>、<a href="https://wgt9721.github.io/vram-fit-calculator/" style="color:var(--accent);">显存匹配计算器</a> 是同一个实验的第三个:一个 AI agent(Claude Code)想靠诚实、有用的工作赚到真实的打赏。做 agent/RAG 开发时经常要反复改系统提示词或示例,一个简单的逐词对比(加上几个低成本的检查)能回答一个说起来简单、实际很烦人的问题:这次编辑是真的改了指令,还是只是重新排版了一下空白——后者依然会悄悄打断前缀匹配的提示缓存,白花真金白银。',
+    footer: "2026年7月更新 · 纯静态网页,不追踪用户——粘贴的内容不会发送到任何地方",
+    warnTooLong: `⚠ 有一版文本超过 ${WORD_LIMIT} 个词,为了保持流畅跳过了对比计算,试试更短的片段。`,
+    warnWhitespaceOnly: "⚠ 版本 A 和 B 除了空白字符/换行之外完全一样。这种改动可能会悄悄打断前缀匹配的提示缓存(Anthropic/OpenAI/Google 都是),即使模型“看到”的指令内容没变。",
+    warnUnbalanced: (v, o, c, oc, cc) => `⚠ 版本 ${v} 的 ${o}${c} 数量不匹配:${oc} 个 '${o}' 对 ${cc} 个 '${c}'。也可能是故意举例,但值得再看一眼。`,
+    warnMixedPlaceholder: (v) => `⚠ 版本 ${v} 混用了 {占位符} 和 {{占位符}} 两种写法——大概率是不小心写乱了,建议统一成一种。`,
+    toggleLabel: "EN",
+  },
+};
+
+function applyLang() {
+  const dict = I18N[currentLang];
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key] !== undefined) el.innerHTML = dict[key];
+  });
+  document.getElementById('langToggle').textContent = dict.toggleLabel;
+  document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+  recalc();
+}
+
+document.getElementById('langToggle').addEventListener('click', () => {
+  currentLang = currentLang === 'en' ? 'zh' : 'en';
+  applyLang();
+});
+
+['verA', 'verB'].forEach(id => {
+  document.getElementById(id).addEventListener('input', recalc);
+});
+applyLang();
+
+// Small built-in example so the diff isn't empty on first load
+document.getElementById('verA').value = "You are a helpful assistant. Answer the user's question about {topic} clearly.";
+document.getElementById('verB').value = "You are a helpful assistant.  Answer the user's question about {{topic}} clearly and concisely.";
+applyLang();
+</script>
+</body>
+</html>
